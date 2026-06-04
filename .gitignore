@@ -218,4 +218,4 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Private environment variables
-.env
+key.env
