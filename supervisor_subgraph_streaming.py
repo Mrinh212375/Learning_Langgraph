@@ -1,5 +1,8 @@
+# from pyexpat.errors import messages
+
 from pyexpat.errors import messages
 
+from hamcrest import instance_of
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
@@ -49,7 +52,7 @@ def flightsupervisor_agent(state: flightState) -> Command:
     system = SystemMessage(content = "You are a helpful assistant that determines whether the user's flight request is domestic or international based on the origin and destination.")
     query = f"""Determine if the flight is domestic or international by looking at this user query - {state['messages'][0].content}. Just respond with either 'domestic' or 'international'."""
     response = llm.invoke([system, HumanMessage(content=query)])
-    print("Supervisor Response:", response.content)
+    # print("Supervisor Response:", response.content)
     if "domestic" in response.content.lower():
 
         return Command(goto="domestic_agent",update={"messages": [AIMessage(content=response.content)]})
@@ -118,7 +121,7 @@ def hotelsearch_agent(state: hotelState) -> dict:
     system = SystemMessage(content = "You are a supervisor having access to two tools: find_budget_hotels and find_luxury_hotels. Based on the user's preferences, determine which tool to use to find hotel options.")
     # query = f"User is looking for a {state['hotel_type']} hotel in {state['location']} on {state['date']}."
     response = llm_with_tool.invoke([system, state["messages"][0]])
-    print("Hotel Search Agent Response:", response)
+    # print("Hotel Search Agent Response:", response)
     return {'messages': [response]}
     # hotel_options = []
     # if isinstance(response,AIMessage) and response.tool_calls:
@@ -181,7 +184,7 @@ def top_supervisor_agent(state: topSupervisorState) -> topSupervisorState:
                                         """)
     query = f"""analyse the messages provided here: {state['messages']}. you have to route among 'flights', 'hotels' & 'end'. Just respond your routing decision in single word, nothing else."""
     response = llm.invoke([system, HumanMessage(content=query)])
-    print("Top Supervisor Response:", response.content)
+    # print("Top Supervisor Response:", response.content)
     return {"messages": [AIMessage(content=response.content)]}
     
 def top_supervisor_router(state:topSupervisorState) -> str:
@@ -222,9 +225,11 @@ if __name__ == "__main__":
     #                                     )
     # print(f"Hotel Options: {result['hotel_options']}")
     # print(hotel_workflow.get_graph().draw_ascii())
-    result = mainworkflow.invoke({"messages":[HumanMessage(content = "Find some flights from kolkata to Goa for 24th June ans also some luxury hotels in Goa for the same date.")]})
-    # for chunk in mainworkflow.stream({"messages":[HumanMessage(content = "Find some flights from kolkata to Goa for 24th June ans also some luxury hotels in Goa for the same date.")]}):
-    #     print(chunk)
+    # result = mainworkflow.invoke({"messages":[HumanMessage(content = "Find some flights from kolkata to Goa for 24th June ans also some luxury hotels in Goa for the same date.")]})
+    for chunk in mainworkflow.stream({"messages":[HumanMessage(content = "Find some flights from kolkata to Goa for 24th June ans also some luxury hotels in Goa for the same date.")]},stream_mode="messages"):
+        # print(f"len of messages now: {len(chunk['messages'])}")
+        print(f"Type of chunk:{instance_of(type(chunk[0]))} and chunk content:\n{chunk[0].content}")
+        # print(chunk)
 
     # print(f"final result:{result['messages'][-1].content}")
     # print(result)
@@ -234,51 +239,8 @@ if __name__ == "__main__":
 
 
 ''' Points to remember:
-  
-    1. Langgraph nodes only deal with the graph states, it must have to return a dictionary which will be used to update the graph state. It can also return a Command to control the graph flow.
-    2. add_conditional_edges method syntax -(source, path_fn, path_map), now an agent or node can express its decesion in response, lets say that node/agent is source, now to route according
-        to that decesion we need a routing_fn which we must have to use as path_fn, path map either we an give or handle from that routing fn.
-    3. ToolNode wrapping by-default checks messages field as its made in that way, so to use ToonNode we need to have messages filed from where it will check the tool_calls on last_message and also store the tool result into the messages field after execution.
-    4.  Toolnode skeleton:
-                            # Simplified version of what ToolNode does:
-                def tool_node_logic(state):
-                    last_message = state["messages"][-1]  # 👈 hardcoded "messages"
-                    
-                    results = []
-                    for tool_call in last_message.tool_calls:
-                        tool = find_tool(tool_call["name"])
-                        result = tool.invoke(tool_call["args"])
-                        results.append(ToolMessage(
-                            content=str(result),
-                            tool_call_id=tool_call["id"]
-                        ))
-                    
-                    return {"messages": results}  # 👈 hardcoded "messages"
-    5. all the prebuilt components e.g - ToolNode, create_react_agent assumes a messages field, that's the contract Langgraph follows.
-    6. we can customize that key in ToolNode like below - 
-        toolnode = ToolNode(
-            [find_budget_hotels, find_luxury_hotels],
-            messages_key="my_custom_messages"  # 👈 use different key
-    7. to run the tools there are other ways also apart from ToolNode - 
-        # ✅ Three ways to run a tool manually:
 
-        # Way 1 — direct invoke
-        result = find_budget_hotels.invoke({"location": "Goa", "date": "2024-12-20"})
+    1.many streaming modes are there - upadtes, messages, values, debug, tasks etc. by default is updates I guess.
+    2.straming() can yield output without waiting till the last of the execution unlike invoke()
 
-        # Way 2 — call as function (only if @tool wrapped)
-        result = find_budget_hotels("Goa", "2024-12-20")
-
-        # Way 3 — using tool object's run method
-        result = find_budget_hotels.run({"location": "Goa", "date": "2024-12-20"})
-    8. printed the hotelgraph, one realization I have made, tools are not nodes btw, they are callable which will be invoked from nodes, thats why in graph visualization only nodes i.e hotelsupervisor is seen.
-    9. When parent and subgraph both have messages with operator.add, the subgraph returns its full message list back which gets appended again to parent's messages — that's why our user query appeared 3 times in the final state.
-)
-
-'''
-
-
-'''  Some more work I want to add but beacuse of time constarint I'm leaving this topic for now, will come back again later
-    1. currently flight options and hotel options are being added to messages list, thats why need to sepaarte them, check how to.
-    2. instaed of keeping messages as shared key, we can keep the information like what has been done and wht's pending in topsupervisor's state and accordingly need to design.
-    3. point 2 idea I have got from claude.
 '''
